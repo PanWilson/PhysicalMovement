@@ -7,9 +7,10 @@
 #include "GameFramework/MovementComponent.h"
 #include "PhysicalMovementComponent.generated.h"
 
-/**
- * 
- */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FApexReachedSignature);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FGravityChangedSignature, float, Gravity);
+
+
 UCLASS(ClassGroup = Movement, meta = (BlueprintSpawnableComponent))
 class PHYSICALMOVEMENT_API UPhysicalMovementComponent : public UMovementComponent
 {
@@ -21,12 +22,6 @@ protected:
 	float MaxSpeed;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
-	float Acceleration;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
-	FRuntimeFloatCurve AccelerationFactorFromDot;
-	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
 	float MaxAccelForce;
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
@@ -34,9 +29,6 @@ protected:
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
 	FVector ForceScale;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
-	float GravityScaleDrop;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Floating")
 	FVector StartTraceOffset;
@@ -79,7 +71,15 @@ protected:
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
 	float BaseGravity;
-
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
+	float JumpSwitchTime;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
+	float InitalVerticalVelocity;
+	
+	FTimerHandle JumpTimer;
+	
 	UPROPERTY(Transient)
 	float JumpGravity;
 	
@@ -91,6 +91,20 @@ protected:
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
 	FVector GravityDirection;
+
+	bool bWantsToJump;
+
+	UPROPERTY(Transient)
+	float JumpRequestTime;
+	
+	UPROPERTY(Transient)
+	float LastOnTheGroundTime;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
+	float JumpBufferTime;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
+	float CoyoteTime;
 	
 	UPROPERTY(Transient)
 	UPrimitiveComponent* OwnerPrimitiveCompo;
@@ -99,19 +113,10 @@ protected:
 	TObjectPtr<class APawn> PawnOwner;
 
 	UPROPERTY(Transient)
-	FVector VelocityInterpolated;
-
-	UPROPERTY(Transient)
 	FVector GroundVelocity;
 
 	UPROPERTY(Transient)
 	FQuat PawnOrientation;
-
-	UPROPERTY(Transient, BlueprintReadOnly)
-	float JumpPressTime;
-
-	UPROPERTY(Transient)
-	bool bJumpPressed;
 
 	UPROPERTY(Transient, BlueprintReadWrite, Category = Movement)
 	bool bIsOnTheGround;
@@ -129,11 +134,6 @@ protected:
 	
 public:
 
-	//DEBUG
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Movement)
-	FDebugFloatHistory FHistory;
-	
 	//Engine overrides
 
 	UPhysicalMovementComponent();
@@ -162,6 +162,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Movement")
 	virtual void SetGravity(const float InGravity);
 	
+	//Events
+	
+	UPROPERTY(BlueprintAssignable);
+	FApexReachedSignature OnApexReached;
+
+	UPROPERTY(BlueprintAssignable);
+	FGravityChangedSignature OnGravityChanged;
+	
 	//Utils
 
 	static FQuat GetShortestRotation(FQuat CurrentOrientation, FQuat TargetOrientation);
@@ -179,4 +187,6 @@ protected:
 	void FallingAfterJumpCheck();
 
 	void OnStoppedJumping();
+
+	void CheckIfWantsToJump();
 };

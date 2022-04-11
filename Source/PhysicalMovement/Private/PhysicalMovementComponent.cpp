@@ -2,8 +2,6 @@
 
 
 #include "PhysicalMovementComponent.h"
-#include "implot.h"
-#include "ImGuiDelegates.h"
 
 UPhysicalMovementComponent::UPhysicalMovementComponent()
 {
@@ -19,6 +17,7 @@ UPhysicalMovementComponent::UPhysicalMovementComponent()
 	OrientationSpringDamping = 3.f;
 
 	bFloatingEnabled = true;
+	bWantsToJump = false;
 }
 
 void UPhysicalMovementComponent::BeginPlay()
@@ -31,13 +30,17 @@ void UPhysicalMovementComponent::BeginPlay()
 		OwnerPrimitiveCompo->SetEnableGravity(false);
 	}
 
+	PawnOrientation = GetOwner()->GetActorForwardVector().ToOrientationQuat();
+	
 	//Initialization of jumping
-	const float FallTravelDistance = FMath::Sqrt((-2.f * JumpHeight * FMath::Square(MaxSpeed))/BaseGravity);
-	const float AscendTravelDistance  = JumpDistance - FallTravelDistance;
+	const float MaxFallTime = FMath::Sqrt((-2.f*JumpHeight)/BaseGravity);
+	const float TotalTime = JumpDistance/MaxSpeed;
+	const float NeededInitialVelocity = -1.f * BaseGravity * ((TotalTime/2.f)- JumpSwitchTime);
+	JumpGravity = (NeededInitialVelocity - InitalVerticalVelocity)/JumpSwitchTime;
+	InitialJumpVelocity = InitalVerticalVelocity;
 
-	const float HalfJumpDistance = JumpDistance/2.f;
-	InitialJumpVelocity = (2.f * JumpHeight * MaxSpeed) / HalfJumpDistance;
-	JumpGravity = (-2.f * JumpHeight * FMath::Square(MaxSpeed)) / FMath::Square(HalfJumpDistance);
+	//InitialJumpVelocity = (2.f * JumpHeight * MaxSpeed) / AscendTravelDistance;
+	//JumpGravity = (-2.f * JumpHeight * FMath::Square(MaxSpeed)) / FMath::Square(AscendTravelDistance);
 	SetGravity(BaseGravity);
 }
 
@@ -87,15 +90,28 @@ FVector UPhysicalMovementComponent::GetPendingInputVector() const
 
 void UPhysicalMovementComponent::Jump()
 {
-	bFloatingEnabled = false;
-	SetGravity(JumpGravity);
-	OwnerPrimitiveCompo->AddImpulse(TraceDirection * -InitialJumpVelocity, NAME_None, true);
-	bRequestApexCheck = true;
+	if (bIsOnTheGround || (LastOnTheGroundTime + CoyoteTime >= GetWorld()->GetWorld()->GetTimeSeconds()))
+	{
+		bWantsToJump = false;
+		bFloatingEnabled = false;
+		SetGravity(JumpGravity);
+		OwnerPrimitiveCompo->AddImpulse(TraceDirection * -InitialJumpVelocity, NAME_None, true);
+		GetWorld()->GetTimerManager().SetTimer(JumpTimer, this, &UPhysicalMovementComponent::StopJump,JumpSwitchTime);
+		//bRequestApexCheck = true;
+	}
+	else
+	{
+		JumpRequestTime = GetWorld()->GetTimeSeconds();
+		bWantsToJump = true;
+	}
 }
 
 void UPhysicalMovementComponent::StopJump()
 {
-	OnStoppedJumping();
+	//if (bRequestApexCheck)
+	{
+		OnStoppedJumping();
+	}
 }
 
 FVector UPhysicalMovementComponent::ConsumeInputVector()
@@ -130,9 +146,18 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 
 	GetWorld()->LineTraceSingleByChannel(OutHit, TraceStart, TraceEnd, FloatTraceChannel,
 	                                     CollisionParams);
+	bool bOldIsOnTheGround = bIsOnTheGround;
 	bIsOnTheGround = OutHit.bBlockingHit;
+	if (!bOldIsOnTheGround && bIsOnTheGround)
+	{
+		if ((JumpRequestTime + JumpBufferTime) > GetWorld()->GetTimeSeconds())
+		{
+			CheckIfWantsToJump();
+		}
+	}
 	if (OutHit.bBlockingHit)
 	{
+		LastOnTheGroundTime = GetWorld()->GetTimeSeconds();
 		const FVector OwnerVelocity = OwnerPrimitiveCompo->GetComponentVelocity();
 
 		UPrimitiveComponent* OtherComponent = OutHit.GetComponent();
@@ -182,7 +207,7 @@ void UPhysicalMovementComponent::ComputeAndApplyOrientationSpring() const
 	ToGoal.ToAxisAndAngle(OrientationAxis, OrientationAngle);
 
 	const FVector TorqueForce = (OrientationAxis * (OrientationAngle * OrientationSpringStrength)) - (OwnerPrimitiveCompo->GetPhysicsAngularVelocityInRadians() * OrientationSpringDamping);
-	return;
+
 	OwnerPrimitiveCompo->AddTorqueInRadians(TorqueForce * OwnerPrimitiveCompo->GetMass());
 }
 
@@ -191,28 +216,22 @@ void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
 	const AController* Controller = PawnOwner->GetController();
 	if (Controller && Controller->IsLocalController())
 	{
-		const FVector ControlAcceleration = GetPendingInputVector().GetClampedToMaxSize(1.f);
+		const FVector ControlDirection = GetPendingInputVector().GetClampedToMaxSize(1.f);
 		
-		if(!FMath::IsNearlyZero(ControlAcceleration.SizeSquared()))
+		if(!FMath::IsNearlyZero(ControlDirection.SizeSquared()))
 		{
-			PawnOrientation = ControlAcceleration.ToOrientationQuat();
+			PawnOrientation = ControlDirection.ToOrientationQuat();
 		}
+		const FVector OwnerVelocity = OwnerPrimitiveCompo->GetComponentVelocity();
+		const float VelocityDot = ControlDirection.GetSafeNormal() | OwnerVelocity;
 		
-		const float VelocityDot = ControlAcceleration.GetSafeNormal() | VelocityInterpolated.GetSafeNormal();
+		const float FinalAcceleration = (MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->Eval(VelocityDot));
 		
-		const float FinalAcceleration = Acceleration * AccelerationFactorFromDot.GetRichCurveConst()->Eval(VelocityDot);
-		
-		const FVector GoalVelocity = ControlAcceleration * MaxSpeed;
+		const FVector GoalVelocity = ControlDirection * MaxSpeed;
 
-		VelocityInterpolated = FMath::VInterpConstantTo(VelocityInterpolated, GoalVelocity+GroundVelocity,DeltaTime, FinalAcceleration);
-
-		FVector NeededAcceleration = (VelocityInterpolated - (OwnerPrimitiveCompo->GetComponentVelocity() * ForceScale)) / DeltaTime;
-
-		const float MaxAccel = MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->Eval(VelocityDot);
-		NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(MaxAccel);
+		FVector NeededAcceleration = ((GoalVelocity + (GroundVelocity * ForceScale)) - (OwnerVelocity * ForceScale)) / DeltaTime;
+		NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(FinalAcceleration);
 		
-		float dir = ControlAcceleration | NeededAcceleration;
-		FHistory.AddSample(FMath::Sign(dir));
 		OwnerPrimitiveCompo->AddForce(NeededAcceleration * OwnerPrimitiveCompo->GetMass() * ForceScale);
 		
 		ConsumeInputVector();
@@ -233,6 +252,7 @@ void UPhysicalMovementComponent::FallingAfterJumpCheck()
 	{
 		OnStoppedJumping();
 		bCheckForApex = false;
+		OnApexReached.Broadcast();
 	}
 	
 	if (bRequestApexCheck)
@@ -244,13 +264,23 @@ void UPhysicalMovementComponent::FallingAfterJumpCheck()
 
 void UPhysicalMovementComponent::OnStoppedJumping()
 {
-	SetGravity(JumpGravity);
+	SetGravity(BaseGravity);
+	bRequestApexCheck = false;
 	bFloatingEnabled = true;
+}
+
+void UPhysicalMovementComponent::CheckIfWantsToJump()
+{
+	if (bWantsToJump)
+	{
+		Jump();
+	}
 }
 
 void UPhysicalMovementComponent::SetGravity(const float InGravity)
 {
 	GravityScale = InGravity / GetGravityZ();
+	OnGravityChanged.Broadcast(GravityScale * GetGravityZ());
 }
 
 
