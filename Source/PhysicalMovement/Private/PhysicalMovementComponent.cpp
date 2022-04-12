@@ -5,17 +5,36 @@
 
 UPhysicalMovementComponent::UPhysicalMovementComponent()
 {
+	//Movement
+	MaxSpeed = 500.f;
+	MaxAccelForce = 1000.f;
+	ForceScale = FVector(1.f, 1.f, 0.f);
+
+	//Floating
 	StartTraceOffset = FVector::ZeroVector;
 	TraceDirection = FVector(0.f, 0.f, -1.f);
-	TraceLength = 100.f;
-	FloatHeight = 20.f;
-	FloatSpringStrength	= 25.f;
-	FloatSpringDamping = 3.f;
+	TraceLength = 85.f;
+	FloatHeight = 80.f;
+	FloatSpringStrength	= 100.f;
+	FloatSpringDamping = .3f;
 	FloatTraceChannel = ECollisionChannel::ECC_Visibility;
-	
-	OrientationSpringStrength = 20.f;
-	OrientationSpringDamping = 3.f;
+	bFloorSnappingEnabled = true;
 
+	//Orientation
+	OrientationSpringStrength = 9375.f;
+	OrientationSpringDamping = 2812.f;
+	
+	//Jump
+	JumpHeight = 120.f;
+	JumpDistance = 400.f;
+	bGravityEnabled = true;
+	BaseGravity = -1470.f;
+	JumpSwitchTime = .3f;
+	InitialVerticalVelocity = 600.f;
+	GravityDirection = FVector(0.f, 0.f, -1.f);
+	MinJumpTime = .1f;
+	JumpBufferTime = .1f;
+	CoyoteTime = .1f;
 	bFloatingEnabled = true;
 	bWantsToJump = false;
 }
@@ -36,11 +55,8 @@ void UPhysicalMovementComponent::BeginPlay()
 	const float MaxFallTime = FMath::Sqrt((-2.f*JumpHeight)/BaseGravity);
 	const float TotalTime = JumpDistance/MaxSpeed;
 	const float NeededInitialVelocity = -1.f * BaseGravity * ((TotalTime/2.f)- JumpSwitchTime);
-	JumpGravity = (NeededInitialVelocity - InitalVerticalVelocity)/JumpSwitchTime;
-	InitialJumpVelocity = InitalVerticalVelocity;
-
-	//InitialJumpVelocity = (2.f * JumpHeight * MaxSpeed) / AscendTravelDistance;
-	//JumpGravity = (-2.f * JumpHeight * FMath::Square(MaxSpeed)) / FMath::Square(AscendTravelDistance);
+	JumpGravity = (NeededInitialVelocity - InitialVerticalVelocity)/JumpSwitchTime;
+	
 	SetGravity(BaseGravity);
 }
 
@@ -51,6 +67,7 @@ void UPhysicalMovementComponent::TickComponent(float DeltaTime, ELevelTick TickT
 
 	if (OwnerPrimitiveCompo != nullptr && OwnerPrimitiveCompo->IsSimulatingPhysics())
 	{
+		CharacterVelocity = OwnerPrimitiveCompo->GetComponentVelocity();
 		ComputeAndApplyFloatingSpring();
 		ApplyInputForces(DeltaTime);
 		ComputeAndApplyOrientationSpring();
@@ -95,9 +112,9 @@ void UPhysicalMovementComponent::Jump()
 		bWantsToJump = false;
 		bFloatingEnabled = false;
 		SetGravity(JumpGravity);
-		OwnerPrimitiveCompo->AddImpulse(TraceDirection * -InitialJumpVelocity, NAME_None, true);
-		GetWorld()->GetTimerManager().SetTimer(JumpTimer, this, &UPhysicalMovementComponent::StopJump,JumpSwitchTime);
-		//bRequestApexCheck = true;
+		OwnerPrimitiveCompo->AddImpulse(TraceDirection * -(InitialVerticalVelocity - FMath::Min(OwnerPrimitiveCompo->GetComponentVelocity().Z,0.f)), NAME_None, true);
+		GetWorld()->GetTimerManager().SetTimer(FallTimerHandle, this, &UPhysicalMovementComponent::OnStoppedJumping,JumpSwitchTime);
+		bRequestApexCheck = true;
 	}
 	else
 	{
@@ -108,9 +125,18 @@ void UPhysicalMovementComponent::Jump()
 
 void UPhysicalMovementComponent::StopJump()
 {
-	//if (bRequestApexCheck)
+	if (FallTimerHandle.IsValid())
 	{
-		OnStoppedJumping();
+		const float TimeSinceJump = GetWorld()->GetTimerManager().GetTimerElapsed(FallTimerHandle);
+		if (TimeSinceJump >= MinJumpTime)
+		{
+			OnStoppedJumping();
+		}
+		else
+		{
+			GetWorld()->GetTimerManager().ClearTimer(FallTimerHandle);
+			GetWorld()->GetTimerManager().SetTimer(FallTimerHandle, this, &UPhysicalMovementComponent::OnStoppedJumping, MinJumpTime - TimeSinceJump);
+		}
 	}
 }
 
@@ -148,6 +174,7 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 	                                     CollisionParams);
 	bool bOldIsOnTheGround = bIsOnTheGround;
 	bIsOnTheGround = OutHit.bBlockingHit;
+	
 	if (!bOldIsOnTheGround && bIsOnTheGround)
 	{
 		if ((JumpRequestTime + JumpBufferTime) > GetWorld()->GetTimeSeconds())
@@ -155,20 +182,24 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 			CheckIfWantsToJump();
 		}
 	}
+	
 	if (OutHit.bBlockingHit)
 	{
 		LastOnTheGroundTime = GetWorld()->GetTimeSeconds();
 		const FVector OwnerVelocity = OwnerPrimitiveCompo->GetComponentVelocity();
 
 		UPrimitiveComponent* OtherComponent = OutHit.GetComponent();
-		FVector OtherVelocity = FVector::ZeroVector;
 		if (OtherComponent != nullptr)
 		{
-			OtherVelocity = OtherComponent->GetComponentVelocity();
+			StandVelocity = OtherComponent->GetComponentVelocity();
+		}
+		else
+		{
+			StandVelocity = FVector::ZeroVector;
 		}
 
 		const float DotDirectionVelocity = OwnerVelocity | TraceDirection;
-		const float DotOtherDirectionVelocity = OtherVelocity | TraceDirection;
+		const float DotOtherDirectionVelocity = StandVelocity | TraceDirection;
 
 		float RelativeVelocity = DotDirectionVelocity - DotOtherDirectionVelocity;
 
@@ -180,16 +211,16 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 		if (bFloatingEnabled)
 		{
 			OwnerPrimitiveCompo->AddForce(TraceDirection * SpringForce * OwnerPrimitiveCompo->GetMass());
-		}
-
-		if (OtherComponent != nullptr)
-		{
-			GroundVelocity = OtherComponent->GetComponentVelocity();
-
-			if (OtherComponent->IsSimulatingPhysics())
+			
+			if (OtherComponent != nullptr)
 			{
-				OtherComponent->AddForceAtLocation(TraceDirection * -SpringForce * OtherComponent->GetMass(),
-				                                   OutHit.Location);
+				StandVelocity = OtherComponent->GetComponentVelocity();
+
+				if (OtherComponent->IsSimulatingPhysics())
+				{
+					OtherComponent->AddForceAtLocation(TraceDirection * -SpringForce * OwnerPrimitiveCompo->GetMass(),
+													   OutHit.Location);
+				}
 			}
 		}
 	}
@@ -213,8 +244,7 @@ void UPhysicalMovementComponent::ComputeAndApplyOrientationSpring() const
 
 void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
 {
-	const AController* Controller = PawnOwner->GetController();
-	if (Controller && Controller->IsLocalController())
+	if (const AController* Controller = PawnOwner->GetController(); Controller && Controller->IsLocalController())
 	{
 		const FVector ControlDirection = GetPendingInputVector().GetClampedToMaxSize(1.f);
 		
@@ -222,14 +252,13 @@ void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
 		{
 			PawnOrientation = ControlDirection.ToOrientationQuat();
 		}
-		const FVector OwnerVelocity = OwnerPrimitiveCompo->GetComponentVelocity();
-		const float VelocityDot = ControlDirection.GetSafeNormal() | OwnerVelocity;
+		const float VelocityDot = ControlDirection.GetSafeNormal() | CharacterVelocity;
 		
 		const float FinalAcceleration = (MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->Eval(VelocityDot));
 		
 		const FVector GoalVelocity = ControlDirection * MaxSpeed;
 
-		FVector NeededAcceleration = ((GoalVelocity + (GroundVelocity * ForceScale)) - (OwnerVelocity * ForceScale)) / DeltaTime;
+		FVector NeededAcceleration = ((GoalVelocity + (StandVelocity * ForceScale)) - (CharacterVelocity * ForceScale)) / DeltaTime;
 		NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(FinalAcceleration);
 		
 		OwnerPrimitiveCompo->AddForce(NeededAcceleration * OwnerPrimitiveCompo->GetMass() * ForceScale);
@@ -250,16 +279,22 @@ void UPhysicalMovementComponent::FallingAfterJumpCheck()
 {
 	if (bCheckForApex && OwnerPrimitiveCompo->GetComponentVelocity().Z < 0.f)
 	{
-		OnStoppedJumping();
+		ReachedApex();
 		bCheckForApex = false;
-		OnApexReached.Broadcast();
 	}
 	
+	//I Have problem with order of apex check since it can happen right after jump and velocity can still be <0
+	//so i wait one Tick to check. Maybe there is better solution
 	if (bRequestApexCheck)
 	{
 		bCheckForApex = true;
 		bRequestApexCheck = false;
 	}
+}
+
+void UPhysicalMovementComponent::ReachedApex()
+{
+	OnApexReached.Broadcast();
 }
 
 void UPhysicalMovementComponent::OnStoppedJumping()
@@ -281,6 +316,16 @@ void UPhysicalMovementComponent::SetGravity(const float InGravity)
 {
 	GravityScale = InGravity / GetGravityZ();
 	OnGravityChanged.Broadcast(GravityScale * GetGravityZ());
+}
+
+FVector UPhysicalMovementComponent::GetStandVelocity()
+{
+	return StandVelocity;
+}
+
+FVector UPhysicalMovementComponent::GetRelativeVelocity()
+{
+	return CharacterVelocity - StandVelocity;
 }
 
 

@@ -76,9 +76,21 @@ protected:
 	float JumpSwitchTime;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
-	float InitalVerticalVelocity;
+	float InitialVerticalVelocity;
 	
-	FTimerHandle JumpTimer;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
+	FVector GravityDirection;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
+	float MinJumpTime;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
+	float JumpBufferTime;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
+	float CoyoteTime;
+	
+	FTimerHandle FallTimerHandle;
 	
 	UPROPERTY(Transient)
 	float JumpGravity;
@@ -89,9 +101,6 @@ protected:
 	UPROPERTY(Transient)
 	float InitialJumpVelocity;
 	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
-	FVector GravityDirection;
-
 	bool bWantsToJump;
 
 	UPROPERTY(Transient)
@@ -99,21 +108,18 @@ protected:
 	
 	UPROPERTY(Transient)
 	float LastOnTheGroundTime;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
-	float JumpBufferTime;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
-	float CoyoteTime;
 	
 	UPROPERTY(Transient)
 	UPrimitiveComponent* OwnerPrimitiveCompo;
 
 	UPROPERTY(Transient, DuplicateTransient)
 	TObjectPtr<class APawn> PawnOwner;
-
+	
 	UPROPERTY(Transient)
-	FVector GroundVelocity;
+	FVector CharacterVelocity;
+	
+	UPROPERTY(Transient)
+	FVector StandVelocity;
 
 	UPROPERTY(Transient)
 	FQuat PawnOrientation;
@@ -144,6 +150,8 @@ public:
 
 	virtual void SetUpdatedComponent(USceneComponent* NewUpdatedComponent) override;
 
+	//Interface
+	
 	UFUNCTION(BlueprintCallable, Category="Movement")
 	virtual void AddInputVector(FVector WorldVector, bool bForce = false);
 
@@ -162,6 +170,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Movement")
 	virtual void SetGravity(const float InGravity);
 	
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Movement")
+	virtual FVector GetStandVelocity();
+	
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Movement")
+	virtual FVector GetRelativeVelocity();
+	
 	//Events
 	
 	UPROPERTY(BlueprintAssignable);
@@ -173,6 +187,7 @@ public:
 	//Utils
 
 	static FQuat GetShortestRotation(FQuat CurrentOrientation, FQuat TargetOrientation);
+	
 protected:
 	
 	//Physical movement
@@ -183,10 +198,13 @@ protected:
 	void ApplyInputForces(const float DeltaTime);
 
 	void ApplyGravity() const;
-
-	void FallingAfterJumpCheck();
-
+	
 	void OnStoppedJumping();
 
 	void CheckIfWantsToJump();
+	
+	void FallingAfterJumpCheck();
+	
+	void ReachedApex();
+
 };

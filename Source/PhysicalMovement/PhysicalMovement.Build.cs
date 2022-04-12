@@ -49,7 +49,5 @@ public class PhysicalMovement : ModuleRules
 				// ... add any modules that your module loads dynamically here ...
 			}
 			);
-		
-		PrivateDependencyModuleNames.AddRange(new string[] {"ImGui"});
 	}
 }
