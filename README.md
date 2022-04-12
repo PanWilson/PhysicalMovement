@@ -2,19 +2,22 @@
 **Physical movement component** with base functionality like:
 - max speed and acceleration
 - custom gravity scale
-- 2 stages jump(set height, distance and jump velocity)
+- 2 stages jump (set height, distance and jump velocity)
 - physical interaction with base o the pawn and relative velocity
 
 ## Future plans
 - gravity direction
-- option to switch facing mode(velocity/camera)
+- option to switch facing mode (velocity/camera)
 - swap line trace for sphere trace for floating
-- options for pawn orientation(constrain XYZ)
+- options for pawn orientation (constrain XYZ)
 - network replication(posibbly with network prediction plugin)
 - pawn stacking
 
 ## Technical setup
+
 Tested on UE5.0
+
+(I suggest using substepping)
 
 ![](https://thumbs.gfycat.com/GiftedCloudyKitten-size_restricted.gif)
 
