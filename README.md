@@ -11,8 +11,8 @@
 - option to switch facing mode (velocity/camera)
 - swap line trace for sphere trace for floating
 - options for pawn orientation (constrain XYZ)
-- asyn physics tick(blocked by state of chaos in UE5)
-- network replication(blocked by state of chaos in UE5)
+- asyn physics tick(blocked by current state of chaos in UE5)
+- network replication(blocked by current state of chaos in UE5)
 - pawn stacking
 
 ## Technical setup
