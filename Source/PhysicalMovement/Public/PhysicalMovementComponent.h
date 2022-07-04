@@ -143,7 +143,10 @@ protected:
 	
 	UPROPERTY(Transient)
 	bool bHasRequestedVelocity;
-
+	
+	UPROPERTY(BlueprintReadWrite, Category = "PhysicsMovement | Movement")
+	bool bInputEnabled;
+	
 public:
 
 	//Engine overrides
@@ -196,7 +199,9 @@ public:
 	
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Movement")
 	virtual FVector GetRelativeVelocity();
-	
+
+	UFUNCTION(BlueprintCallable, Category="Movement")
+	void EnableInput(bool bInEnable = true);
 	//Events
 	
 	UPROPERTY(BlueprintAssignable);

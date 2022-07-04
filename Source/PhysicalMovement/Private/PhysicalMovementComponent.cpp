@@ -41,6 +41,7 @@ UPhysicalMovementComponent::UPhysicalMovementComponent()
 	CoyoteTime = .1f;
 	bFloatingEnabled = true;
 	bWantsToJump = false;
+	bInputEnabled = true;
 }
 
 void UPhysicalMovementComponent::BeginPlay()
@@ -217,19 +218,22 @@ float UPhysicalMovementComponent::GetPathFollowingBrakingDistance(float InMaxSpe
 
 void UPhysicalMovementComponent::Jump()
 {
-	if (bIsOnTheGround || (LastOnTheGroundTime + CoyoteTime >= GetWorld()->GetWorld()->GetTimeSeconds()))
+	if (bInputEnabled)
 	{
-		bWantsToJump = false;
-		bFloatingEnabled = false;
-		SetGravity(JumpGravity);
-		UpdatePrimitive->AddImpulse(TraceDirection * -(InitialVerticalVelocity - FMath::Min(UpdatePrimitive->GetComponentVelocity().Z,0.f)), NAME_None, true);
-		GetWorld()->GetTimerManager().SetTimer(FallTimerHandle, this, &UPhysicalMovementComponent::OnStoppedJumping,JumpSwitchTime);
-		bRequestApexCheck = true;
-	}
-	else
-	{
-		JumpRequestTime = GetWorld()->GetTimeSeconds();
-		bWantsToJump = true;
+		if (bIsOnTheGround || (LastOnTheGroundTime + CoyoteTime >= GetWorld()->GetWorld()->GetTimeSeconds()))
+		{
+			bWantsToJump = false;
+			bFloatingEnabled = false;
+			SetGravity(JumpGravity);
+			UpdatePrimitive->AddImpulse(TraceDirection * -(InitialVerticalVelocity - FMath::Min(UpdatePrimitive->GetComponentVelocity().Z,0.f)), NAME_None, true);
+			GetWorld()->GetTimerManager().SetTimer(FallTimerHandle, this, &UPhysicalMovementComponent::OnStoppedJumping,JumpSwitchTime);
+			bRequestApexCheck = true;
+		}
+		else
+		{
+			JumpRequestTime = GetWorld()->GetTimeSeconds();
+			bWantsToJump = true;
+		}
 	}
 }
 
@@ -249,11 +253,6 @@ void UPhysicalMovementComponent::StopJump()
 		}
 	}
 }
-
-// FVector UPhysicalMovementComponent::ConsumeInputVector()
-// {
-// 	return PawnOwner ? PawnOwner->Internal_ConsumeMovementInputVector() : FVector::ZeroVector;
-// }
 
 FQuat UPhysicalMovementComponent::GetShortestRotation(FQuat CurrentOrientation, FQuat TargetOrientation)
 {
@@ -356,30 +355,32 @@ void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
 {
 	if (const AController* Controller = PawnOwner->GetController(); Controller && Controller->IsLocalController())
 	{
-		const FVector ControlDirection = GetPendingInputVector().GetClampedToMaxSize(1.f);
-		
-		if(!FMath::IsNearlyZero(ControlDirection.SizeSquared()))
+		if (bInputEnabled)
 		{
-			PawnOrientation = ControlDirection.ToOrientationQuat();
-		}
-		const float VelocityDot = ControlDirection.GetSafeNormal() | CharacterVelocity;
+			const FVector ControlDirection = GetPendingInputVector().GetClampedToMaxSize(1.f);
 		
-		const float FinalAcceleration = (MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->Eval(VelocityDot));
+			if(!FMath::IsNearlyZero(ControlDirection.SizeSquared()))
+			{
+				PawnOrientation = ControlDirection.ToOrientationQuat();
+			}
+			const float VelocityDot = ControlDirection.GetSafeNormal() | CharacterVelocity;
 		
-		FVector GoalVelocity = ControlDirection * MaxSpeed;
+			const float FinalAcceleration = (MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->Eval(VelocityDot));
+		
+			FVector GoalVelocity = ControlDirection * MaxSpeed;
 
-		if(bHasRequestedVelocity)
-		{
-			GoalVelocity = RequestedVelocity;
-			bHasRequestedVelocity = false;
-			RequestedVelocity = FVector::ZeroVector;
-		}
+			if(bHasRequestedVelocity)
+			{
+				GoalVelocity = RequestedVelocity;
+				bHasRequestedVelocity = false;
+				RequestedVelocity = FVector::ZeroVector;
+			}
 
-		FVector NeededAcceleration = ((GoalVelocity + (StandVelocity * ForceScale)) - (CharacterVelocity * ForceScale)) / DeltaTime;
-		NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(FinalAcceleration);
+			FVector NeededAcceleration = ((GoalVelocity + (StandVelocity * ForceScale)) - (CharacterVelocity * ForceScale)) / DeltaTime;
+			NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(FinalAcceleration);
 		
-		UpdatePrimitive->AddForce(NeededAcceleration * UpdatePrimitive->GetMass() * ForceScale);
-		
+			UpdatePrimitive->AddForce(NeededAcceleration * UpdatePrimitive->GetMass() * ForceScale);
+		}
 		ConsumeInputVector();
 	}
 }
@@ -449,6 +450,11 @@ FVector UPhysicalMovementComponent::GetStandVelocity()
 FVector UPhysicalMovementComponent::GetRelativeVelocity()
 {
 	return CharacterVelocity - StandVelocity;
+}
+
+void UPhysicalMovementComponent::EnableInput(bool bInEnable)
+{
+	bInputEnabled = bInEnable;
 }
 
 
