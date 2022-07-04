@@ -4,20 +4,20 @@
 - custom gravity scale
 - 2 stages jump (set height, distance and jump velocity)
 - physical interaction with base o the pawn and relative velocity
+- basic AI implementation
 
 ## Future plans
 - gravity direction
 - option to switch facing mode (velocity/camera)
 - swap line trace for sphere trace for floating
 - options for pawn orientation (constrain XYZ)
-- network replication(posibbly with network prediction plugin)
+- asyn physics tick(blocked by current state of chaos in UE5)
+- network replication(blocked by current state of chaos in UE5)
 - pawn stacking
 
 ## Technical setup
 
 Tested on UE5.0
-
-(I suggest using substepping)
 
 ![](https://thumbs.gfycat.com/GiftedCloudyKitten-size_restricted.gif)
 
