@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "BlueprintEditorModule.h"
-#include "GameFramework/MovementComponent.h"
+#include "GameFramework/PawnMovementComponent.h"
 #include "PhysicalMovementComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FApexReachedSignature);
@@ -12,7 +12,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FGravityChangedSignature, float, Gra
 
 
 UCLASS(ClassGroup = Movement, meta = (BlueprintSpawnableComponent))
-class PHYSICALMOVEMENT_API UPhysicalMovementComponent : public UMovementComponent
+class PHYSICALMOVEMENT_API UPhysicalMovementComponent : public UPawnMovementComponent
 {
 	GENERATED_BODY()
 
@@ -90,6 +90,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
 	float CoyoteTime;
 	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | AI")
+	float BrakingDecelerationWalking;
+	
 	FTimerHandle FallTimerHandle;
 	
 	UPROPERTY(Transient)
@@ -110,10 +113,7 @@ protected:
 	float LastOnTheGroundTime;
 	
 	UPROPERTY(Transient)
-	UPrimitiveComponent* OwnerPrimitiveCompo;
-
-	UPROPERTY(Transient, DuplicateTransient)
-	TObjectPtr<class APawn> PawnOwner;
+	UPrimitiveComponent* UpdatePrimitive;
 	
 	UPROPERTY(Transient)
 	FVector CharacterVelocity;
@@ -138,6 +138,12 @@ protected:
 	UPROPERTY(Transient)
 	FVector OldVelocity;
 	
+	UPROPERTY(Transient)
+	FVector RequestedVelocity;
+	
+	UPROPERTY(Transient)
+	bool bHasRequestedVelocity;
+
 public:
 
 	//Engine overrides
@@ -151,12 +157,27 @@ public:
 	virtual void SetUpdatedComponent(USceneComponent* NewUpdatedComponent) override;
 
 	//Interface
-	
-	UFUNCTION(BlueprintCallable, Category="Movement")
-	virtual void AddInputVector(FVector WorldVector, bool bForce = false);
 
-	UFUNCTION(BlueprintCallable, Category="Movement", meta=(Keywords="GetInput"))
-	FVector GetPendingInputVector() const;
+	//BEGIN UMovementComponent Interface
+	virtual float GetMaxSpeed() const override;
+	virtual void StopActiveMovement() override;
+	virtual bool IsCrouching() const override;
+	virtual bool IsFalling() const override;
+	virtual bool IsMovingOnGround() const override;
+	virtual bool IsSwimming() const override;
+	virtual bool IsFlying() const override;
+	virtual float GetGravityZ() const override;
+	virtual void AddRadialForce(const FVector& Origin, float Radius, float Strength, enum ERadialImpulseFalloff Falloff) override;
+	virtual void AddRadialImpulse(const FVector& Origin, float Radius, float Strength, enum ERadialImpulseFalloff Falloff, bool bVelChange) override;
+	//END UMovementComponent Interface
+	
+	//BEGIN UNavMovementComponent Interface
+	virtual void RequestDirectMove(const FVector& MoveVelocity, bool bForceMaxSpeed) override;
+	virtual void RequestPathMove(const FVector& MoveInput) override;
+	virtual bool CanStartPathFollowing() const override;
+	virtual bool CanStopPathFollowing() const override;
+	virtual float GetPathFollowingBrakingDistance(float InMaxSpeed) const override;
+	//END UNaVMovementComponent Interface
 
 	UFUNCTION(BlueprintCallable, Category="Movement")
 	virtual void Jump();
@@ -165,10 +186,10 @@ public:
 	virtual void StopJump();
 
 	UFUNCTION(BlueprintCallable, Category="Movement")
-	virtual FVector ConsumeInputVector();
-
-	UFUNCTION(BlueprintCallable, Category="Movement")
 	virtual void SetGravity(const float InGravity);
+	
+	UFUNCTION(BlueprintCallable, Category="Movement")
+	float GetWorldGravityZ() const ;
 	
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Movement")
 	virtual FVector GetStandVelocity();

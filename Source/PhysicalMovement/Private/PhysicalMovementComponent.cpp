@@ -3,6 +3,10 @@
 
 #include "PhysicalMovementComponent.h"
 
+#include "AITestsCommon.h"
+#include "GameFramework/PhysicsVolume.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+
 UPhysicalMovementComponent::UPhysicalMovementComponent()
 {
 	//Movement
@@ -43,10 +47,10 @@ void UPhysicalMovementComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	
-	OwnerPrimitiveCompo = Cast<UPrimitiveComponent>(GetOwner()->GetComponentByClass(UPrimitiveComponent::StaticClass()));
-	if (OwnerPrimitiveCompo != nullptr)
+	UpdatePrimitive = Cast<UPrimitiveComponent>(GetOwner()->GetComponentByClass(UPrimitiveComponent::StaticClass()));
+	if (UpdatePrimitive != nullptr)
 	{
-		OwnerPrimitiveCompo->SetEnableGravity(false);
+		UpdatePrimitive->SetEnableGravity(false);
 	}
 
 	PawnOrientation = GetOwner()->GetActorForwardVector().ToOrientationQuat();
@@ -65,15 +69,15 @@ void UPhysicalMovementComponent::TickComponent(float DeltaTime, ELevelTick TickT
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (OwnerPrimitiveCompo != nullptr && OwnerPrimitiveCompo->IsSimulatingPhysics())
+	if (UpdatePrimitive != nullptr && UpdatePrimitive->IsSimulatingPhysics())
 	{
-		CharacterVelocity = OwnerPrimitiveCompo->GetComponentVelocity();
+		CharacterVelocity = UpdatePrimitive->GetComponentVelocity();
 		ComputeAndApplyFloatingSpring();
 		ApplyInputForces(DeltaTime);
 		ComputeAndApplyOrientationSpring();
 		ApplyGravity();
 		FallingAfterJumpCheck();
-		OldVelocity = OwnerPrimitiveCompo->GetComponentVelocity();
+		OldVelocity = UpdatePrimitive->GetComponentVelocity();
 	}
 }
 
@@ -92,17 +96,123 @@ void UPhysicalMovementComponent::SetUpdatedComponent(USceneComponent* NewUpdated
 	PawnOwner = UpdatedComponent ? CastChecked<APawn>(UpdatedComponent->GetOwner()) : nullptr;
 }
 
-void UPhysicalMovementComponent::AddInputVector(FVector WorldVector, bool bForce)
+float UPhysicalMovementComponent::GetMaxSpeed() const
 {
-	if (PawnOwner)
+	return MaxSpeed;
+}
+
+void UPhysicalMovementComponent::StopActiveMovement()
+{
+	Super::StopActiveMovement();
+}
+
+bool UPhysicalMovementComponent::IsCrouching() const
+{
+	return false;
+}
+
+bool UPhysicalMovementComponent::IsFalling() const
+{
+	return !bIsOnTheGround && !bCheckForApex;
+}
+
+bool UPhysicalMovementComponent::IsMovingOnGround() const
+{
+	return bIsOnTheGround;
+}
+
+bool UPhysicalMovementComponent::IsSwimming() const
+{
+	return false;
+}
+
+bool UPhysicalMovementComponent::IsFlying() const
+{
+	return false;
+}
+
+float UPhysicalMovementComponent::GetGravityZ() const
+{
+	return BaseGravity * GravityScale;
+}
+
+void UPhysicalMovementComponent::AddRadialForce(const FVector& Origin, float Radius, float Strength,
+	ERadialImpulseFalloff Falloff)
+{
+	UpdatePrimitive->AddRadialForce(Origin, Radius, Strength, Falloff);
+}
+
+void UPhysicalMovementComponent::AddRadialImpulse(const FVector& Origin, float Radius, float Strength,
+	ERadialImpulseFalloff Falloff, bool bVelChange)
+{
+	UpdatePrimitive->AddRadialImpulse(Origin, Radius, Strength, Falloff, bVelChange);
+}
+
+void UPhysicalMovementComponent::RequestDirectMove(const FVector& MoveVelocity, bool bForceMaxSpeed)
+{
+	if (MoveVelocity.SizeSquared() < KINDA_SMALL_NUMBER)
 	{
-		PawnOwner->Internal_AddMovementInput(WorldVector, bForce);
+		return;
+	}
+
+	// if (ShouldPerformAirControlForPathFollowing())
+	// {
+	// 	const FVector FallVelocity = MoveVelocity.GetClampedToMaxSize(GetMaxSpeed());
+	// 	PerformAirControlForPathFollowing(FallVelocity, FallVelocity.Z);
+	// 	return;
+	// }
+
+	RequestedVelocity = MoveVelocity;
+	bHasRequestedVelocity = true;
+
+	if (IsMovingOnGround())
+	{
+		RequestedVelocity.Z = 0.0f;
 	}
 }
 
-FVector UPhysicalMovementComponent::GetPendingInputVector() const
+void UPhysicalMovementComponent::RequestPathMove(const FVector& MoveInput)
 {
-	return PawnOwner ? PawnOwner->Internal_GetPendingMovementInputVector() : FVector::ZeroVector;
+	FVector AdjustedMoveInput(MoveInput);
+
+	// preserve magnitude when moving on ground/falling and requested input has Z component
+	// see ConstrainInputAcceleration for details
+	if (MoveInput.Z != 0.f && (IsMovingOnGround() || IsFalling()))
+	{
+		const float Mag = MoveInput.Size();
+		AdjustedMoveInput = MoveInput.GetSafeNormal2D() * Mag;
+	}
+	
+	Super::RequestPathMove(AdjustedMoveInput);
+}
+
+bool UPhysicalMovementComponent::CanStartPathFollowing() const
+{
+	if (UpdatePrimitive != nullptr && !UpdatePrimitive->IsSimulatingPhysics())
+	{
+		return false;
+	}
+
+	return Super::CanStartPathFollowing();
+}
+
+bool UPhysicalMovementComponent::CanStopPathFollowing() const
+{
+	return !IsFalling();
+}
+
+float UPhysicalMovementComponent::GetPathFollowingBrakingDistance(float InMaxSpeed) const
+{
+	if (bUseFixedBrakingDistanceForPaths)
+	{
+		return FixedPathBrakingDistance;
+	}
+
+	const float BrakingDeceleration = FMath::Abs(BrakingDecelerationWalking);
+
+	// character won't be able to stop with negative or nearly zero deceleration, use MaxSpeed for path length calculations
+	const float BrakingDistance = (BrakingDeceleration < SMALL_NUMBER) ? MaxSpeed : (FMath::Square(MaxSpeed) / (2.f * BrakingDeceleration));
+	return BrakingDistance;
 }
 
 void UPhysicalMovementComponent::Jump()
@@ -112,7 +222,7 @@ void UPhysicalMovementComponent::Jump()
 		bWantsToJump = false;
 		bFloatingEnabled = false;
 		SetGravity(JumpGravity);
-		OwnerPrimitiveCompo->AddImpulse(TraceDirection * -(InitialVerticalVelocity - FMath::Min(OwnerPrimitiveCompo->GetComponentVelocity().Z,0.f)), NAME_None, true);
+		UpdatePrimitive->AddImpulse(TraceDirection * -(InitialVerticalVelocity - FMath::Min(UpdatePrimitive->GetComponentVelocity().Z,0.f)), NAME_None, true);
 		GetWorld()->GetTimerManager().SetTimer(FallTimerHandle, this, &UPhysicalMovementComponent::OnStoppedJumping,JumpSwitchTime);
 		bRequestApexCheck = true;
 	}
@@ -140,10 +250,10 @@ void UPhysicalMovementComponent::StopJump()
 	}
 }
 
-FVector UPhysicalMovementComponent::ConsumeInputVector()
-{
-	return PawnOwner ? PawnOwner->Internal_ConsumeMovementInputVector() : FVector::ZeroVector;
-}
+// FVector UPhysicalMovementComponent::ConsumeInputVector()
+// {
+// 	return PawnOwner ? PawnOwner->Internal_ConsumeMovementInputVector() : FVector::ZeroVector;
+// }
 
 FQuat UPhysicalMovementComponent::GetShortestRotation(FQuat CurrentOrientation, FQuat TargetOrientation)
 {
@@ -186,7 +296,7 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 	if (OutHit.bBlockingHit)
 	{
 		LastOnTheGroundTime = GetWorld()->GetTimeSeconds();
-		const FVector OwnerVelocity = OwnerPrimitiveCompo->GetComponentVelocity();
+		const FVector OwnerVelocity = UpdatePrimitive->GetComponentVelocity();
 
 		UPrimitiveComponent* OtherComponent = OutHit.GetComponent();
 		if (OtherComponent != nullptr)
@@ -210,7 +320,7 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 
 		if (bFloatingEnabled)
 		{
-			OwnerPrimitiveCompo->AddForce(TraceDirection * SpringForce * OwnerPrimitiveCompo->GetMass());
+			UpdatePrimitive->AddForce(TraceDirection * SpringForce * UpdatePrimitive->GetMass());
 			
 			if (OtherComponent != nullptr)
 			{
@@ -218,7 +328,7 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 
 				if (OtherComponent->IsSimulatingPhysics())
 				{
-					OtherComponent->AddForceAtLocation(TraceDirection * -SpringForce * OwnerPrimitiveCompo->GetMass(),
+					OtherComponent->AddForceAtLocation(TraceDirection * -SpringForce * UpdatePrimitive->GetMass(),
 													   OutHit.Location);
 				}
 			}
@@ -229,7 +339,7 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 
 void UPhysicalMovementComponent::ComputeAndApplyOrientationSpring() const
 {
-	const FQuat OwnerOrientation = OwnerPrimitiveCompo->GetComponentTransform().GetRotation();
+	const FQuat OwnerOrientation = UpdatePrimitive->GetComponentTransform().GetRotation();
 	const FQuat ToGoal = GetShortestRotation(OwnerOrientation, PawnOrientation);
 
 	FVector OrientationAxis;
@@ -237,9 +347,9 @@ void UPhysicalMovementComponent::ComputeAndApplyOrientationSpring() const
 	
 	ToGoal.ToAxisAndAngle(OrientationAxis, OrientationAngle);
 
-	const FVector TorqueForce = (OrientationAxis * (OrientationAngle * OrientationSpringStrength)) - (OwnerPrimitiveCompo->GetPhysicsAngularVelocityInRadians() * OrientationSpringDamping);
+	const FVector TorqueForce = (OrientationAxis * (OrientationAngle * OrientationSpringStrength)) - (UpdatePrimitive->GetPhysicsAngularVelocityInRadians() * OrientationSpringDamping);
 
-	OwnerPrimitiveCompo->AddTorqueInRadians(TorqueForce * OwnerPrimitiveCompo->GetMass());
+	UpdatePrimitive->AddTorqueInRadians(TorqueForce * UpdatePrimitive->GetMass());
 }
 
 void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
@@ -256,12 +366,19 @@ void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
 		
 		const float FinalAcceleration = (MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->Eval(VelocityDot));
 		
-		const FVector GoalVelocity = ControlDirection * MaxSpeed;
+		FVector GoalVelocity = ControlDirection * MaxSpeed;
+
+		if(bHasRequestedVelocity)
+		{
+			GoalVelocity = RequestedVelocity;
+			bHasRequestedVelocity = false;
+			RequestedVelocity = FVector::ZeroVector;
+		}
 
 		FVector NeededAcceleration = ((GoalVelocity + (StandVelocity * ForceScale)) - (CharacterVelocity * ForceScale)) / DeltaTime;
 		NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(FinalAcceleration);
 		
-		OwnerPrimitiveCompo->AddForce(NeededAcceleration * OwnerPrimitiveCompo->GetMass() * ForceScale);
+		UpdatePrimitive->AddForce(NeededAcceleration * UpdatePrimitive->GetMass() * ForceScale);
 		
 		ConsumeInputVector();
 	}
@@ -271,13 +388,13 @@ void UPhysicalMovementComponent::ApplyGravity() const
 {
 	if (bGravityEnabled)
 	{
-		OwnerPrimitiveCompo->AddForce(GravityDirection * -GravityScale * GetGravityZ(), NAME_None, true);
+		UpdatePrimitive->AddForce(GravityDirection * -GravityScale * GetWorldGravityZ(), NAME_None, true);
 	}
 }
 
 void UPhysicalMovementComponent::FallingAfterJumpCheck()
 {
-	if (bCheckForApex && OwnerPrimitiveCompo->GetComponentVelocity().Z < 0.f)
+	if (bCheckForApex && UpdatePrimitive->GetComponentVelocity().Z < 0.f)
 	{
 		ReachedApex();
 		bCheckForApex = false;
@@ -314,8 +431,14 @@ void UPhysicalMovementComponent::CheckIfWantsToJump()
 
 void UPhysicalMovementComponent::SetGravity(const float InGravity)
 {
-	GravityScale = InGravity / GetGravityZ();
-	OnGravityChanged.Broadcast(GravityScale * GetGravityZ());
+	GravityScale = InGravity / GetWorldGravityZ();
+	OnGravityChanged.Broadcast(GravityScale * GetWorldGravityZ());
+}
+
+float UPhysicalMovementComponent::GetWorldGravityZ() const
+{
+	APhysicsVolume* PhysicsVolume = GetPhysicsVolume();
+	return PhysicsVolume ? PhysicsVolume->GetGravityZ() : UPhysicsSettings::Get()->DefaultGravityZ;
 }
 
 FVector UPhysicalMovementComponent::GetStandVelocity()
