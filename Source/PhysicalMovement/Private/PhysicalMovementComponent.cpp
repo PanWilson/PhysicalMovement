@@ -355,32 +355,36 @@ void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
 {
 	if (const AController* Controller = PawnOwner->GetController(); Controller && Controller->IsLocalController())
 	{
-		if (bInputEnabled)
+		FVector ControlDirection = GetPendingInputVector().GetClampedToMaxSize(1.f);
+		
+		if (!bInputEnabled)
 		{
-			const FVector ControlDirection = GetPendingInputVector().GetClampedToMaxSize(1.f);
-		
-			if(!FMath::IsNearlyZero(ControlDirection.SizeSquared()))
-			{
-				PawnOrientation = ControlDirection.ToOrientationQuat();
-			}
-			const float VelocityDot = ControlDirection.GetSafeNormal() | CharacterVelocity;
-		
-			const float FinalAcceleration = (MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->Eval(VelocityDot));
-		
-			FVector GoalVelocity = ControlDirection * MaxSpeed;
-
-			if(bHasRequestedVelocity)
-			{
-				GoalVelocity = RequestedVelocity;
-				bHasRequestedVelocity = false;
-				RequestedVelocity = FVector::ZeroVector;
-			}
-
-			FVector NeededAcceleration = ((GoalVelocity + (StandVelocity * ForceScale)) - (CharacterVelocity * ForceScale)) / DeltaTime;
-			NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(FinalAcceleration);
-		
-			UpdatePrimitive->AddForce(NeededAcceleration * UpdatePrimitive->GetMass() * ForceScale);
+			ControlDirection = FVector::ZeroVector;
 		}
+		
+		if (!FMath::IsNearlyZero(ControlDirection.SizeSquared()))
+		{
+			PawnOrientation = ControlDirection.ToOrientationQuat();
+		}
+		const float VelocityDot = ControlDirection.GetSafeNormal() | CharacterVelocity;
+
+		const float FinalAcceleration = (MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->
+			Eval(VelocityDot));
+
+		FVector GoalVelocity = ControlDirection * MaxSpeed;
+
+		if (bHasRequestedVelocity)
+		{
+			GoalVelocity = RequestedVelocity;
+			bHasRequestedVelocity = false;
+			RequestedVelocity = FVector::ZeroVector;
+		}
+
+		FVector NeededAcceleration = ((GoalVelocity + (StandVelocity * ForceScale)) - (CharacterVelocity * ForceScale))
+			/ DeltaTime;
+		NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(FinalAcceleration);
+
+		UpdatePrimitive->AddForce(NeededAcceleration * UpdatePrimitive->GetMass() * ForceScale);
 		ConsumeInputVector();
 	}
 }
