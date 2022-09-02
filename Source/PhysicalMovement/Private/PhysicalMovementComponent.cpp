@@ -27,6 +27,8 @@ UPhysicalMovementComponent::UPhysicalMovementComponent()
 	//Orientation
 	OrientationSpringStrength = 9375.f;
 	OrientationSpringDamping = 2812.f;
+	bRotateTowardsMovement = true;
+	bUseControlRotation = false;
 	
 	//Jump
 	JumpHeight = 120.f;
@@ -42,6 +44,7 @@ UPhysicalMovementComponent::UPhysicalMovementComponent()
 	bFloatingEnabled = true;
 	bWantsToJump = false;
 	bInputEnabled = true;
+	bHasMoveToRequest = false;
 }
 
 void UPhysicalMovementComponent::BeginPlay()
@@ -54,6 +57,8 @@ void UPhysicalMovementComponent::BeginPlay()
 		UpdatePrimitive->SetEnableGravity(false);
 	}
 
+	CurrentMaxAccelForce = MaxAccelForce;
+	
 	PawnOrientation = GetOwner()->GetActorForwardVector().ToOrientationQuat();
 	
 	//Initialization of jumping
@@ -73,7 +78,9 @@ void UPhysicalMovementComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	if (UpdatePrimitive != nullptr && UpdatePrimitive->IsSimulatingPhysics())
 	{
 		CharacterVelocity = UpdatePrimitive->GetComponentVelocity();
+		CharacterSpeed = CharacterVelocity.Size();
 		ComputeAndApplyFloatingSpring();
+		UpdateMoveTo(DeltaTime);
 		ApplyInputForces(DeltaTime);
 		ComputeAndApplyOrientationSpring();
 		ApplyGravity();
@@ -336,8 +343,12 @@ void UPhysicalMovementComponent::ComputeAndApplyFloatingSpring()
 
 }
 
-void UPhysicalMovementComponent::ComputeAndApplyOrientationSpring() const
+void UPhysicalMovementComponent::ComputeAndApplyOrientationSpring()
 {
+	if (bUseControlRotation && PawnOwner->GetController())
+	{
+		PawnOrientation = PawnOwner->GetController()->GetDesiredRotation().Quaternion();
+	}
 	const FQuat OwnerOrientation = UpdatePrimitive->GetComponentTransform().GetRotation();
 	const FQuat ToGoal = GetShortestRotation(OwnerOrientation, PawnOrientation);
 
@@ -362,14 +373,11 @@ void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
 			ControlDirection = FVector::ZeroVector;
 		}
 		
-		if (!FMath::IsNearlyZero(ControlDirection.SizeSquared()))
+		if (bRotateTowardsMovement && !FMath::IsNearlyZero(ControlDirection.SizeSquared()))
 		{
 			PawnOrientation = ControlDirection.ToOrientationQuat();
 		}
 		const float VelocityDot = ControlDirection.GetSafeNormal() | CharacterVelocity;
-
-		const float FinalAcceleration = (MaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->
-			Eval(VelocityDot));
 
 		FVector GoalVelocity = ControlDirection * MaxSpeed;
 
@@ -380,9 +388,22 @@ void UPhysicalMovementComponent::ApplyInputForces(const float DeltaTime)
 			RequestedVelocity = FVector::ZeroVector;
 		}
 
-		FVector NeededAcceleration = ((GoalVelocity + (StandVelocity * ForceScale)) - (CharacterVelocity * ForceScale))
-			/ DeltaTime;
-		NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(FinalAcceleration);
+		const FVector NetVelocity = GoalVelocity + (StandVelocity * ForceScale);
+		FVector NeededAcceleration = (NetVelocity - (CharacterVelocity * ForceScale))/ DeltaTime;
+		
+		const bool bIsDecelerating = (NeededAcceleration.SizeSquared() > SMALL_NUMBER) && (FMath::IsNearlyZero(CharacterVelocity.SizeSquared()) || ((CharacterVelocity | NeededAcceleration) < 0.f));
+		
+		float AccelerationLimit = 0.f;
+		if (!bIsDecelerating)
+		{
+			AccelerationLimit = (CurrentMaxAccelForce * MaxAccelerationForceFactorFromDot.GetRichCurveConst()->Eval(VelocityDot));
+		}
+		else
+		{
+			AccelerationLimit = MaxDecelerationAtSpeed.GetRichCurve()->Eval(CharacterSpeed);
+		}
+		
+		NeededAcceleration = NeededAcceleration.GetClampedToMaxSize(AccelerationLimit);
 
 		UpdatePrimitive->AddForce(NeededAcceleration * UpdatePrimitive->GetMass() * ForceScale);
 		ConsumeInputVector();
@@ -417,6 +438,23 @@ void UPhysicalMovementComponent::FallingAfterJumpCheck()
 void UPhysicalMovementComponent::ReachedApex()
 {
 	OnApexReached.Broadcast();
+}
+
+void UPhysicalMovementComponent::UpdateMoveTo(float DeltaTime)
+{
+	if (bHasMoveToRequest)
+	{
+		RemainingMoveToTime -= DeltaTime;
+		if (RemainingMoveToTime>0.f)
+		{
+			RequestedVelocity = MoveToVelocity;
+			bHasRequestedVelocity = true;
+		}
+		else
+		{
+			StopMoveTo();
+		}
+	}
 }
 
 void UPhysicalMovementComponent::OnStoppedJumping()
@@ -459,6 +497,23 @@ FVector UPhysicalMovementComponent::GetRelativeVelocity()
 void UPhysicalMovementComponent::EnableInput(bool bInEnable)
 {
 	bInputEnabled = bInEnable;
+}
+
+void UPhysicalMovementComponent::MoveTo(FVector InLocation, float Time)
+{
+	const FVector FromTo = InLocation - GetOwner()->GetActorLocation();
+	MoveToVelocity = FromTo/Time;
+	RemainingMoveToTime = Time;
+	CurrentMaxAccelForce = 1000000.f;
+	bHasMoveToRequest = true;
+	UpdateMoveTo(0.f);
+}
+
+void UPhysicalMovementComponent::StopMoveTo()
+{
+	bHasMoveToRequest = false;
+	CurrentMaxAccelForce = MaxAccelForce;
+	MoveToVelocity = FVector::ZeroVector;
 }
 
 

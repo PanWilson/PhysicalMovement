@@ -25,6 +25,9 @@ protected:
 	float MaxAccelForce;
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
+	FRuntimeFloatCurve MaxDecelerationAtSpeed;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
 	FRuntimeFloatCurve MaxAccelerationForceFactorFromDot;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Movement")
@@ -59,7 +62,13 @@ protected:
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Orientation")
 	float OrientationSpringDamping;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Orientation")
+	bool bRotateTowardsMovement;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Orientation")
+	bool bUseControlRotation;
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsMovement | Jump")
 	float JumpHeight;
 	
@@ -117,6 +126,9 @@ protected:
 	
 	UPROPERTY(Transient)
 	FVector CharacterVelocity;
+
+	UPROPERTY(Transient)
+	float CharacterSpeed;
 	
 	UPROPERTY(Transient)
 	FVector StandVelocity;
@@ -146,6 +158,15 @@ protected:
 	
 	UPROPERTY(BlueprintReadWrite, Category = "PhysicsMovement | Movement")
 	bool bInputEnabled;
+	
+	bool bHasMoveToRequest;
+
+	float RemainingMoveToTime;
+	
+	FVector MoveToVelocity;
+
+	UPROPERTY(Transient)
+	float CurrentMaxAccelForce;
 	
 public:
 
@@ -202,6 +223,13 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Movement")
 	void EnableInput(bool bInEnable = true);
+
+	UFUNCTION(BlueprintCallable, Category="Movement")
+	void MoveTo(FVector InLocation, float Time);
+
+	UFUNCTION(BlueprintCallable, Category="Movement")
+	void StopMoveTo();
+	
 	//Events
 	
 	UPROPERTY(BlueprintAssignable);
@@ -219,7 +247,7 @@ protected:
 	//Physical movement
 	void ComputeAndApplyFloatingSpring();
 
-	void ComputeAndApplyOrientationSpring() const;
+	void ComputeAndApplyOrientationSpring();
 
 	void ApplyInputForces(const float DeltaTime);
 
@@ -232,5 +260,7 @@ protected:
 	void FallingAfterJumpCheck();
 	
 	void ReachedApex();
+
+	void UpdateMoveTo(float DeltaTime);
 
 };
